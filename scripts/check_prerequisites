@@ -1,0 +1,121 @@
+#!/usr/bin/env bash
+# Susanoo — consolidated prerequisite checking.
+#
+# Port of spec-kit's check_prerequisites.py. Prints JSON on stdout with --json.
+set -euo pipefail
+
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/common.sh"
+
+usage() {
+  cat >&2 <<'EOF'
+Usage: check_prerequisites [OPTIONS]
+
+OPTIONS:
+  --json              Output in JSON format
+  --require-spec      Require spec.md to exist (for the analysis phase)
+  --require-tasks     Require tasks.md to exist (for the implementation phase)
+  --include-tasks     Include tasks.md in AVAILABLE_DOCS
+  --paths-only        Only output path variables (no prerequisite validation)
+  --template NAME     Include composed template content in JSON output
+  --help, -h          Show this help message
+EOF
+}
+
+json_mode=0
+require_spec=0
+require_tasks=0
+include_tasks=0
+paths_only=0
+template_name=""
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --json) json_mode=1 ;;
+    --require-spec) require_spec=1 ;;
+    --require-tasks) require_tasks=1 ;;
+    --include-tasks) include_tasks=1 ;;
+    --paths-only) paths_only=1 ;;
+    --template)
+      [ $# -ge 2 ] || die "--template requires a template name"
+      template_name="$2"; shift ;;
+    --help|-h) usage; exit 0 ;;
+    *) die "Unknown option '$1'. Use --help for usage information." ;;
+  esac
+  shift
+done
+
+if [ "$paths_only" -eq 1 ]; then
+  resolve_feature_paths 1
+  if [ "$json_mode" -eq 1 ]; then
+    printf '{"REPO_ROOT":"%s","BRANCH":"%s","FEATURE_DIR":"%s","FEATURE_SPEC":"%s","IMPL_PLAN":"%s","TASKS":"%s"}\n' \
+      "$(json_str "$SUSANOO_REPO_ROOT")" "$(json_str "$SUSANOO_BRANCH")" \
+      "$(json_str "$SUSANOO_FEATURE_DIR")" "$(json_str "$SUSANOO_FEATURE_DIR/spec.md")" \
+      "$(json_str "$SUSANOO_FEATURE_DIR/plan.md")" "$(json_str "$SUSANOO_FEATURE_DIR/tasks.md")"
+  else
+    printf 'REPO_ROOT: %s\n' "$SUSANOO_REPO_ROOT"
+    printf 'BRANCH: %s\n' "$SUSANOO_BRANCH"
+    printf 'FEATURE_DIR: %s\n' "$SUSANOO_FEATURE_DIR"
+    printf 'FEATURE_SPEC: %s\n' "$SUSANOO_FEATURE_DIR/spec.md"
+    printf 'IMPL_PLAN: %s\n' "$SUSANOO_FEATURE_DIR/plan.md"
+    printf 'TASKS: %s\n' "$SUSANOO_FEATURE_DIR/tasks.md"
+  fi
+  exit 0
+fi
+
+resolve_feature_paths 0
+feature_dir="$SUSANOO_FEATURE_DIR"
+feature_spec="$feature_dir/spec.md"
+impl_plan="$feature_dir/plan.md"
+tasks_file="$feature_dir/tasks.md"
+
+[ -d "$feature_dir" ] || die "Feature directory not found: $feature_dir. Run scripts/new_feature first to create the feature structure."
+[ -f "$impl_plan" ] || die "plan.md not found in $feature_dir. Run scripts/setup_plan first to create the implementation plan."
+[ -s "$impl_plan" ] || die "plan.md is empty in $feature_dir. Populate it, or remove the empty file and rerun scripts/setup_plan with a valid plan template."
+[ "$require_spec" -eq 0 ] || [ -f "$feature_spec" ] || die "spec.md not found in $feature_dir. Run scripts/new_feature first to create the feature specification."
+[ "$require_tasks" -eq 0 ] || [ -f "$tasks_file" ] || die "tasks.md not found in $feature_dir. Run the tasks stage first to create the task list."
+
+# Available docs (newline-separated).
+available_docs() {
+  [ -f "$feature_dir/research.md" ] && echo "research.md"
+  [ -f "$feature_dir/data-model.md" ] && echo "data-model.md"
+  if [ -d "$feature_dir/contracts" ] && [ -n "$(ls -A "$feature_dir/contracts" 2>/dev/null)" ]; then
+    echo "contracts/"
+  fi
+  [ -f "$feature_dir/quickstart.md" ] && echo "quickstart.md"
+  [ "$include_tasks" -eq 1 ] && [ -f "$tasks_file" ] && echo "tasks.md"
+}
+
+template_content=""
+if [ -n "$template_name" ]; then
+  tmpl="$(templates_dir)/$template_name.md"
+  [ -f "$tmpl" ] || die "Could not resolve required $template_name from $tmpl."
+  template_content="$(cat "$tmpl")"
+fi
+
+if [ "$json_mode" -eq 1 ]; then
+  docs_json=""
+  while IFS= read -r d; do
+    [ -z "$d" ] && continue
+    if [ -z "$docs_json" ]; then docs_json="\"$(json_str "$d")\""; else docs_json="$docs_json,\"$(json_str "$d")\""; fi
+  done <<< "$(available_docs)"
+  if [ -n "$template_name" ]; then
+    printf '{"FEATURE_DIR":"%s","AVAILABLE_DOCS":[%s],"TEMPLATE_CONTENT":"%s"}\n' \
+      "$(json_str "$feature_dir")" "$docs_json" "$(json_str "$template_content")"
+  else
+    printf '{"FEATURE_DIR":"%s","AVAILABLE_DOCS":[%s]}\n' \
+      "$(json_str "$feature_dir")" "$docs_json"
+  fi
+else
+  printf 'FEATURE_DIR: %s\n' "$feature_dir"
+  printf 'AVAILABLE_DOCS:\n'
+  mark_file() { if [ -f "$1" ]; then printf '  [OK] %s\n' "$2"; else printf '  [--] %s\n' "$2"; fi; }
+  mark_file "$feature_dir/research.md" "research.md"
+  mark_file "$feature_dir/data-model.md" "data-model.md"
+  if [ -d "$feature_dir/contracts" ] && [ -n "$(ls -A "$feature_dir/contracts" 2>/dev/null)" ]; then
+    printf '  [OK] %s\n' "contracts/"
+  else
+    printf '  [--] %s\n' "contracts/"
+  fi
+  mark_file "$feature_dir/quickstart.md" "quickstart.md"
+  [ "$include_tasks" -eq 1 ] && mark_file "$tasks_file" "tasks.md"
+fi

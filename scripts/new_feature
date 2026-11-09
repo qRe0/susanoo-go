@@ -1,0 +1,133 @@
+#!/usr/bin/env bash
+# Susanoo — allocate the next feature directory and seed its spec.
+#
+# Port of spec-kit's create_new_feature.py, reduced to Susanoo's layout:
+#   specs/<NNN>-<short-name>/
+# Prints JSON on stdout when --json is passed; status and warnings go to stderr.
+set -euo pipefail
+
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/common.sh"
+
+usage() {
+  cat >&2 <<'EOF'
+Usage: new_feature [--json] [--dry-run] [--allow-existing-branch]
+                   [--short-name NAME] [--number N] [--timestamp]
+                   [--help|-h] <feature_description>
+EOF
+}
+
+json_mode=0
+dry_run=0
+allow_existing=0
+short_name=""
+branch_number=""
+use_timestamp=0
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --json) json_mode=1 ;;
+    --dry-run) dry_run=1 ;;
+    --allow-existing-branch) allow_existing=1 ;;
+    --short-name)
+      [ $# -ge 2 ] || die "--short-name requires a value"
+      short_name="$2"; shift ;;
+    --number)
+      [ $# -ge 2 ] || die "--number requires a value"
+      branch_number="$2"; shift ;;
+    --timestamp) use_timestamp=1 ;;
+    --help|-h) usage; exit 0 ;;
+    --*) die "Unknown option '$1'" ;;
+    *) break ;;
+  esac
+  shift
+done
+
+description="$*"
+[ -z "$description" ] && { usage; exit 1; }
+
+specs="$(specs_dir)"
+[ "$dry_run" -eq 0 ] && mkdir -p "$specs"
+
+# Branch suffix: an explicit --short-name, or derived from the description.
+if [ -n "$short_name" ]; then
+  branch_suffix="$(clean_slug "$short_name")"
+else
+  branch_suffix="$(branch_suffix_from_description "$description")"
+fi
+
+if [ -z "$branch_suffix" ]; then
+  warn "Warning: feature name is empty after removing unsupported characters."
+  warn "Use --short-name with letters or digits (for example, user-auth)."
+fi
+
+# Feature number: timestamp, an explicit --number, or the next sequential number.
+if [ "$use_timestamp" -eq 1 ]; then
+  [ -n "$branch_number" ] && warn "Warning: --number is ignored when --timestamp is used"
+  feature_num="$(date +%Y%m%d-%H%M%S)"
+else
+  number=""
+  if [ -n "$branch_number" ]; then
+    printf '%s' "$branch_number" | grep -Eq '^[0-9]+$' || die "--number must be an unsigned integer, got '$branch_number'"
+    number="$branch_number"
+  else
+    number="$(( $(highest_feature_number "$specs") + 1 ))"
+  fi
+  feature_num="$(printf '%03d' "$number")"
+fi
+
+branch_name="$(fit_branch_name "$feature_num" "$branch_suffix")"
+feature_dir="$specs/$branch_name"
+spec_file="$feature_dir/spec.md"
+
+# An explicit --number is a preference: if its prefix is already owned by a different
+# feature directory, auto-correct to the next free number.
+if [ -n "$branch_number" ] && [ "$use_timestamp" -eq 0 ]; then
+  conflict=0
+  if [ "$allow_existing" -eq 1 ] && [ -d "$feature_dir" ]; then
+    conflict=0
+  elif spec_prefix_exists "$specs" "$feature_num"; then
+    conflict=1
+  fi
+  if [ "$conflict" -eq 1 ]; then
+    requested="$feature_num"
+    n="$(( $(highest_feature_number "$specs") + 1 ))"
+    while spec_prefix_exists "$specs" "$(printf '%03d' "$n")"; do n=$((n + 1)); done
+    feature_num="$(printf '%03d' "$n")"
+    warn "Warning: --number $requested conflicts with an existing spec directory; using $feature_num instead"
+    branch_name="$(fit_branch_name "$feature_num" "$branch_suffix")"
+    feature_dir="$specs/$branch_name"
+    spec_file="$feature_dir/spec.md"
+  fi
+fi
+
+if [ "$dry_run" -eq 0 ]; then
+  if [ -d "$feature_dir" ] && [ "$allow_existing" -eq 0 ]; then
+    die "Feature directory '$feature_dir' already exists. Use a different name or a different --number."
+  fi
+  mkdir -p "$feature_dir"
+
+  if [ ! -f "$spec_file" ]; then
+    tmpl="$(templates_dir)/spec-template.md"
+    if [ -f "$tmpl" ]; then
+      cp "$tmpl" "$spec_file"
+    else
+      warn "Warning: spec template not found; created empty spec file"
+      : > "$spec_file"
+    fi
+  fi
+
+  no_persist_env || persist_feature "specs/$branch_name"
+fi
+
+if [ "$json_mode" -eq 1 ]; then
+  printf '{"BRANCH_NAME":"%s","SPEC_FILE":"%s","FEATURE_NUM":"%s","FEATURE_DIR":"%s"' \
+    "$(json_str "$branch_name")" "$(json_str "$spec_file")" \
+    "$(json_str "$feature_num")" "$(json_str "$feature_dir")"
+  [ "$dry_run" -eq 1 ] && printf ',"DRY_RUN":true'
+  printf '}\n'
+else
+  printf 'BRANCH_NAME: %s\n' "$branch_name"
+  printf 'SPEC_FILE: %s\n' "$spec_file"
+  printf 'FEATURE_NUM: %s\n' "$feature_num"
+  printf 'FEATURE_DIR: %s\n' "$feature_dir"
+fi

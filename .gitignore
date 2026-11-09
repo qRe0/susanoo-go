@@ -1,0 +1,21 @@
+# Root-folder mode runtime state: per-project specs/tasks/rulings Susanoo writes
+# while driving repos.
+.susanoo/*
+!.susanoo/README.md
+
+# Root-folder mode target repositories: repos cloned here are separate Git
+# repositories, not part of this kit.
+projects/*
+!projects/README.md
+
+# Python bytecode cache from the writing-quality scanners.
+__pycache__/
+*.pyc
+
+# OS / editor noise.
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+.idea/
+.vscode/

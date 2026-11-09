@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+# Susanoo — AI-slop gate on staged prose (git pre-commit).
+#
+# Enhance-only: this script never touches your existing hooks — wire it side-by-side
+# (core.hooksPath to a wrapper dir, or append this body to your own pre-commit).
+# It blocks only on a *hard* banned-phrase finding; everything else passes.
+set -uo pipefail
+
+# Locate the scanner: explicit override first, then the repo's injected copy.
+SCANNER="${SUSANOO_WRITING_SCRIPTS:-}"
+if [ -z "$SCANNER" ]; then
+  root="$(git rev-parse --show-toplevel 2>/dev/null || echo "$PWD")"
+  SCANNER="$root/.claude/skills/writing-quality/scripts/banned_phrase_scan.py"
+fi
+if [ ! -f "$SCANNER" ]; then
+  echo "susanoo: writing-quality scanner not found at $SCANNER — skipping slop gate" >&2
+  exit 0
+fi
+
+# Prose-bearing files only, to avoid false positives in code.
+files="$(git -C "$(git rev-parse --show-toplevel 2>/dev/null || echo "$PWD")" diff --cached --name-only --diff-filter=ACMR \
+  | grep -Ei '(\.md$|\.txt$|\.mdx$|\.rst$|^README|^CHANGELOG|^CHANGES|^docs/|^\.changes/hips)' || true)"
+[ -z "$files" ] && exit 0
+
+failed=0
+while IFS= read -r f; do
+  [ -z "$f" ] && continue
+  [ -f "$f" ] || continue
+  [ -s "$f" ] || continue
+  out="$(python3 -I "$SCANNER" "$f" 2>/dev/null)"; code=$?
+  case "$code" in
+    1)
+      hard="$(printf '%s' "$out" | python3 -c 'import sys,json
+try:
+    d=json.load(sys.stdin)
+    print(int(d.get("by_severity", {}).get("hard", 0)))
+except Exception:
+    print(1)' 2>/dev/null)"
+      echo "" >&2
+      if [ "${hard:-0}" -gt 0 ]; then
+        echo "susanoo: hard AI-slop in staged file: $f" >&2
+        printf '%s\n' "$out" >&2
+        failed=1
+      else
+        echo "susanoo: soft AI-slop in staged file: $f (proceeding)" >&2
+        printf '%s\n' "$out" >&2
+      fi
+      ;;
+    2)
+      echo "susanoo: could not read $f; skipped slop scan." >&2
+      ;;
+  esac
+done <<< "$files"
+
+if [ "$failed" -eq 1 ]; then
+  echo "" >&2
+  echo "susanoo: commit blocked by the writing-quality gate. Fix the flagged prose," >&2
+  echo "         or override intentionally with: git commit --no-verify" >&2
+  exit 1
+fi
+exit 0

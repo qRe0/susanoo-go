@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+# Susanoo — AI-slop check on the commit message (git commit-msg).
+#
+# Soft gate: warns and always exits 0. Use pre-commit for the blocking (hard) gate.
+set -uo pipefail
+
+msg_file="$1"
+SCANNER="${SUSANOO_WRITING_SCRIPTS:-}"
+if [ -z "$SCANNER" ]; then
+  root="$(git rev-parse --show-toplevel 2>/dev/null || echo "$PWD")"
+  SCANNER="$root/.claude/skills/writing-quality/scripts/banned_phrase_scan.py"
+fi
+[ -f "$SCANNER" ] || exit 0
+[ -s "$msg_file" ] || exit 0
+
+out="$(python3 -I "$SCANNER" "$msg_file" 2>/dev/null)"; code=$?
+if [ "$code" -eq 1 ]; then
+  echo "" >&2
+  echo "susanoo: AI-slop detected in the commit message (proceeding; consider tightening):" >&2
+  printf '%s\n' "$out" >&2
+fi
+exit 0

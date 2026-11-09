@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+# Susanoo — copy the plan template into the current feature directory.
+#
+# Port of spec-kit's setup_plan.py. Prints JSON on stdout with --json.
+set -euo pipefail
+
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/common.sh"
+
+usage() {
+  cat >&2 <<'EOF'
+Usage: setup_plan [--json] [--help|-h]
+EOF
+}
+
+json_mode=0
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --json) json_mode=1 ;;
+    --help|-h) usage; exit 0 ;;
+    *) die "Unknown option '$1'" ;;
+  esac
+  shift
+done
+
+resolve_feature_paths 0
+feature_dir="$SUSANOO_FEATURE_DIR"
+feature_spec="$feature_dir/spec.md"
+impl_plan="$feature_dir/plan.md"
+mkdir -p "$feature_dir"
+
+if [ -f "$impl_plan" ]; then
+  warn "Plan already exists at $impl_plan, skipping template copy"
+else
+  tmpl="$(templates_dir)/plan-template.md"
+  [ -f "$tmpl" ] || die "Plan template not found; no new plan.md was created. Restore a valid plan template and rerun."
+  [ -s "$tmpl" ] || die "Plan template is empty; no new plan.md was created. Restore a valid plan template and rerun."
+  cp "$tmpl" "$impl_plan"
+  warn "Copied plan template to $impl_plan"
+fi
+
+if [ "$json_mode" -eq 1 ]; then
+  printf '{"FEATURE_SPEC":"%s","IMPL_PLAN":"%s","FEATURE_DIR":"%s","BRANCH":"%s"}\n' \
+    "$(json_str "$feature_spec")" "$(json_str "$impl_plan")" \
+    "$(json_str "$feature_dir")" "$(json_str "$SUSANOO_BRANCH")"
+else
+  printf 'FEATURE_SPEC: %s\n' "$feature_spec"
+  printf 'IMPL_PLAN: %s\n' "$impl_plan"
+  printf 'FEATURE_DIR: %s\n' "$feature_dir"
+  printf 'BRANCH: %s\n' "$SUSANOO_BRANCH"
+fi
