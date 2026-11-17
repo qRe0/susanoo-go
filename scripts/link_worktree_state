@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+# Susanoo — link gitignored root-folder state into a linked git worktree.
+#
+# Feature branches are git worktrees, and a worktree only checks out tracked files.
+# `projects/*` (cloned target repos) and `.susanoo/*` (per-project state) are
+# gitignored, so a fresh worktree would lack them. This symlinks each entry from the
+# primary worktree. Enhance-only: it never replaces an existing path in the worktree.
+#
+# Usage: link_worktree_state [worktree-dir]   (default: current directory)
+set -euo pipefail
+
+target="$(cd "${1:-.}" && git rev-parse --show-toplevel)"
+primary="$(git -C "$target" worktree list --porcelain | sed -n '1s/^worktree //p')"
+
+if [ -z "$primary" ] || [ "$primary" = "$target" ]; then
+  exit 0 # already the primary worktree: nothing to link
+fi
+
+for dir in projects .susanoo; do
+  [ -d "$primary/$dir" ] || continue
+  mkdir -p "$target/$dir"
+  for src in "$primary/$dir"/* "$primary/$dir"/.[!.]*; do
+    [ -e "$src" ] || continue
+    name="$(basename "$src")"
+    [ "$name" = "README.md" ] && continue
+    dest="$target/$dir/$name"
+    if [ -e "$dest" ] || [ -L "$dest" ]; then
+      continue
+    fi
+    ln -s "$src" "$dest"
+    echo "susanoo: linked $dir/$name -> $src" >&2
+  done
+done

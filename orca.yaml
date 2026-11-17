@@ -1,0 +1,5 @@
+# Orca workspace config. Orca does not run git hooks when it creates worktrees, so the
+# post-checkout hook never fires there; run the same linker as the setup script instead.
+# Symlinks the gitignored projects/* and .susanoo/* entries from the primary worktree.
+scripts:
+  setup: bash scripts/link_worktree_state

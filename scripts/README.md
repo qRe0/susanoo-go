@@ -64,6 +64,13 @@ is `1` or `true`.
 {"FEATURE_DIR":"/abs/specs/001-user-auth","AVAILABLE_DOCS":["research.md"]}
 ```
 
+## `link_worktree_state`
+
+`link_worktree_state [worktree-dir]` symlinks the gitignored `projects/*` and `.susanoo/*`
+entries from the primary worktree into a linked worktree (feature branches would otherwise
+lack them). Never replaces existing paths; no-op in the primary worktree. Run automatically
+by `git-hooks/post-checkout`.
+
 ## Deviations from spec-kit
 
 - No `.specify/` project tree; the artifact root is the repo root or `.susanoo/<project>/`.
