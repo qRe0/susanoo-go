@@ -33,6 +33,11 @@ hyphenated, short.
 git worktree add <worktree-dir>/<feature-name> -b feature/<feature-name>
 ```
 
+In root-folder mode `projects/*` and `.susanoo/*` are gitignored, so the new worktree
+starts without them. Right after creating it, run `scripts/link_worktree_state <worktree-dir>`
+(the `post-checkout` hook does this automatically when wired); it symlinks each entry from the
+primary worktree and never replaces existing paths.
+
 Directory priority: existing `.worktrees/` → `worktrees/` → preference in `CLAUDE.md`/`AGENTS.md`
 → ask. Verify the directory is git-ignored before creating worktrees inside the repo; ask
 before editing `.gitignore`. If the branch already exists, ask before reusing it. Do not
